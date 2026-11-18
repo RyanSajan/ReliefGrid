@@ -1,0 +1,12 @@
+@"
+.env
+__pycache__/
+*.py[cod]
+*$py.class
+*.db
+*.sqlite
+*.sqlite3
+.pytest_cache/
+.DS_Store
+*Zone.Identifier*
+"@ | Set-Content -Path .gitignore -Encoding utf8
