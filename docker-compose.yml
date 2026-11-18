@@ -1,0 +1,88 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    ports: ["15672:15672"]
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    hostname: rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      retries: 10
+  coordinator:
+    build: .
+    command: uvicorn app.coordinator:app --host 0.0.0.0 --port 8000
+    depends_on: [shard-0-primary,shard-0-replica,shard-1-primary,shard-1-replica,shard-2-primary,shard-2-replica]
+  request-service:
+    build: .
+    ports: ["8000:8000"]
+    depends_on:
+      coordinator:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET in .env}
+      AUTH_DB: /data/auth.sqlite
+    volumes:
+      - auth-data:/data
+  matcher:
+    build: .
+    command: python -m app.matcher
+    depends_on:
+      coordinator:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+  shard-0-primary:
+    build: .
+    command: uvicorn app.storage:app --host 0.0.0.0 --port 8000
+    environment:
+      NODE_NAME: shard-0-primary
+    volumes:
+      - shard-0-primary-data:/data
+  shard-0-replica:
+    build: .
+    command: uvicorn app.storage:app --host 0.0.0.0 --port 8000
+    environment:
+      NODE_NAME: shard-0-replica
+    volumes:
+      - shard-0-replica-data:/data
+  shard-1-primary:
+    build: .
+    command: uvicorn app.storage:app --host 0.0.0.0 --port 8000
+    environment:
+      NODE_NAME: shard-1-primary
+    volumes:
+      - shard-1-primary-data:/data
+  shard-1-replica:
+    build: .
+    command: uvicorn app.storage:app --host 0.0.0.0 --port 8000
+    environment:
+      NODE_NAME: shard-1-replica
+    volumes:
+      - shard-1-replica-data:/data
+  shard-2-primary:
+    build: .
+    command: uvicorn app.storage:app --host 0.0.0.0 --port 8000
+    environment:
+      NODE_NAME: shard-2-primary
+    volumes:
+      - shard-2-primary-data:/data
+  shard-2-replica:
+    build: .
+    command: uvicorn app.storage:app --host 0.0.0.0 --port 8000
+    environment:
+      NODE_NAME: shard-2-replica
+    volumes:
+      - shard-2-replica-data:/data
+volumes:
+  shard-0-primary-data:
+  shard-0-replica-data:
+  shard-1-primary-data:
+  shard-1-replica-data:
+  shard-2-primary-data:
+  shard-2-replica-data:
+
+  auth-data:
+  rabbitmq-data:
