@@ -1,0 +1,602 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: emergency
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: request-service-data
+  namespace: emergency
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 256Mi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: shard-0-primary-data
+  namespace: emergency
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 256Mi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: shard-0-replica-data
+  namespace: emergency
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 256Mi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: shard-1-primary-data
+  namespace: emergency
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 256Mi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: shard-1-replica-data
+  namespace: emergency
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 256Mi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: shard-2-primary-data
+  namespace: emergency
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 256Mi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: shard-2-replica-data
+  namespace: emergency
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 256Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: request-service
+  namespace: emergency
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: request-service
+  template:
+    metadata:
+      labels:
+        app: request-service
+    spec:
+      containers:
+      - name: app
+        image: emergency-app:latest
+        imagePullPolicy: IfNotPresent
+        command: ["uvicorn", "app.request_service:app", "--host", "0.0.0.0", "--port", "8000"]
+        ports:
+        - containerPort: 8000
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+        env:
+        - name: AUTH_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: reliefgrid-auth
+              key: AUTH_SECRET
+        - name: RABBITMQ_URL
+          value: amqp://guest:guest@rabbitmq/
+        - name: COORDINATOR_URL
+          value: http://coordinator:8000
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: request-service-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: request-service
+  namespace: emergency
+spec:
+  selector:
+    app: request-service
+  ports:
+  - port: 8000
+    targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coordinator
+  namespace: emergency
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: coordinator
+  template:
+    metadata:
+      labels:
+        app: coordinator
+    spec:
+      containers:
+      - name: app
+        image: emergency-app:latest
+        imagePullPolicy: IfNotPresent
+        command: ["uvicorn", "app.coordinator:app", "--host", "0.0.0.0", "--port", "8000"]
+        ports:
+        - containerPort: 8000
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+        env:
+        - name: RABBITMQ_URL
+          value: amqp://guest:guest@rabbitmq/
+        - name: COORDINATOR_URL
+          value: http://coordinator:8000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: coordinator
+  namespace: emergency
+spec:
+  selector:
+    app: coordinator
+  ports:
+  - port: 8000
+    targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: matcher
+  namespace: emergency
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: matcher
+  template:
+    metadata:
+      labels:
+        app: matcher
+    spec:
+      containers:
+      - name: app
+        image: emergency-app:latest
+        imagePullPolicy: IfNotPresent
+        command: ["python", "-m", "app.matcher"]
+        ports:
+        - containerPort: 8000
+        env:
+        - name: RABBITMQ_URL
+          value: amqp://guest:guest@rabbitmq/
+        - name: COORDINATOR_URL
+          value: http://coordinator:8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shard-0-primary
+  namespace: emergency
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: shard-0-primary
+  template:
+    metadata:
+      labels:
+        app: shard-0-primary
+    spec:
+      containers:
+      - name: app
+        image: emergency-app:latest
+        imagePullPolicy: IfNotPresent
+        command: ["uvicorn", "app.storage:app", "--host", "0.0.0.0", "--port", "8000"]
+        ports:
+        - containerPort: 8000
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+        env:
+        - name: RABBITMQ_URL
+          value: amqp://guest:guest@rabbitmq/
+        - name: COORDINATOR_URL
+          value: http://coordinator:8000
+        - name: NODE_NAME
+          value: shard-0-primary
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: shard-0-primary-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shard-0-primary
+  namespace: emergency
+spec:
+  selector:
+    app: shard-0-primary
+  ports:
+  - port: 8000
+    targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shard-0-replica
+  namespace: emergency
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: shard-0-replica
+  template:
+    metadata:
+      labels:
+        app: shard-0-replica
+    spec:
+      containers:
+      - name: app
+        image: emergency-app:latest
+        imagePullPolicy: IfNotPresent
+        command: ["uvicorn", "app.storage:app", "--host", "0.0.0.0", "--port", "8000"]
+        ports:
+        - containerPort: 8000
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+        env:
+        - name: RABBITMQ_URL
+          value: amqp://guest:guest@rabbitmq/
+        - name: COORDINATOR_URL
+          value: http://coordinator:8000
+        - name: NODE_NAME
+          value: shard-0-replica
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: shard-0-replica-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shard-0-replica
+  namespace: emergency
+spec:
+  selector:
+    app: shard-0-replica
+  ports:
+  - port: 8000
+    targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shard-1-primary
+  namespace: emergency
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: shard-1-primary
+  template:
+    metadata:
+      labels:
+        app: shard-1-primary
+    spec:
+      containers:
+      - name: app
+        image: emergency-app:latest
+        imagePullPolicy: IfNotPresent
+        command: ["uvicorn", "app.storage:app", "--host", "0.0.0.0", "--port", "8000"]
+        ports:
+        - containerPort: 8000
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+        env:
+        - name: RABBITMQ_URL
+          value: amqp://guest:guest@rabbitmq/
+        - name: COORDINATOR_URL
+          value: http://coordinator:8000
+        - name: NODE_NAME
+          value: shard-1-primary
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: shard-1-primary-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shard-1-primary
+  namespace: emergency
+spec:
+  selector:
+    app: shard-1-primary
+  ports:
+  - port: 8000
+    targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shard-1-replica
+  namespace: emergency
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: shard-1-replica
+  template:
+    metadata:
+      labels:
+        app: shard-1-replica
+    spec:
+      containers:
+      - name: app
+        image: emergency-app:latest
+        imagePullPolicy: IfNotPresent
+        command: ["uvicorn", "app.storage:app", "--host", "0.0.0.0", "--port", "8000"]
+        ports:
+        - containerPort: 8000
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+        env:
+        - name: RABBITMQ_URL
+          value: amqp://guest:guest@rabbitmq/
+        - name: COORDINATOR_URL
+          value: http://coordinator:8000
+        - name: NODE_NAME
+          value: shard-1-replica
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: shard-1-replica-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shard-1-replica
+  namespace: emergency
+spec:
+  selector:
+    app: shard-1-replica
+  ports:
+  - port: 8000
+    targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shard-2-primary
+  namespace: emergency
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: shard-2-primary
+  template:
+    metadata:
+      labels:
+        app: shard-2-primary
+    spec:
+      containers:
+      - name: app
+        image: emergency-app:latest
+        imagePullPolicy: IfNotPresent
+        command: ["uvicorn", "app.storage:app", "--host", "0.0.0.0", "--port", "8000"]
+        ports:
+        - containerPort: 8000
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+        env:
+        - name: RABBITMQ_URL
+          value: amqp://guest:guest@rabbitmq/
+        - name: COORDINATOR_URL
+          value: http://coordinator:8000
+        - name: NODE_NAME
+          value: shard-2-primary
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: shard-2-primary-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shard-2-primary
+  namespace: emergency
+spec:
+  selector:
+    app: shard-2-primary
+  ports:
+  - port: 8000
+    targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shard-2-replica
+  namespace: emergency
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: shard-2-replica
+  template:
+    metadata:
+      labels:
+        app: shard-2-replica
+    spec:
+      containers:
+      - name: app
+        image: emergency-app:latest
+        imagePullPolicy: IfNotPresent
+        command: ["uvicorn", "app.storage:app", "--host", "0.0.0.0", "--port", "8000"]
+        ports:
+        - containerPort: 8000
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+        env:
+        - name: RABBITMQ_URL
+          value: amqp://guest:guest@rabbitmq/
+        - name: COORDINATOR_URL
+          value: http://coordinator:8000
+        - name: NODE_NAME
+          value: shard-2-replica
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: shard-2-replica-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shard-2-replica
+  namespace: emergency
+spec:
+  selector:
+    app: shard-2-replica
+  ports:
+  - port: 8000
+    targetPort: 8000
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rabbitmq-data
+  namespace: emergency
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 256Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rabbitmq
+  namespace: emergency
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: rabbitmq
+  template:
+    metadata:
+      labels:
+        app: rabbitmq
+    spec:
+      hostname: rabbitmq
+      containers:
+      - name: rabbitmq
+        image: rabbitmq:3.13-management
+        readinessProbe:
+          exec:
+            command: [rabbitmq-diagnostics, -q, ping]
+          timeoutSeconds: 5
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/rabbitmq
+        ports:
+        - containerPort: 5672
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: rabbitmq-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  namespace: emergency
+spec:
+  selector:
+    app: rabbitmq
+  ports:
+  - port: 5672
+    targetPort: 5672
+
